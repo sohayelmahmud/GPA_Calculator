@@ -38,8 +38,7 @@ export default function CourseForm({ onSubmit, onCancel, initial }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    if (!Number.isInteger(credits) || credits < 1) return;
-    if (hasLab) {
+    if (!Number.isInteger(credits) || credits < 0) return; if (hasLab) {
       if (!Number.isInteger(theoryCredits) || !Number.isInteger(labCredits)) return;
       if (theoryCredits + labCredits !== credits) return;
     }
@@ -71,13 +70,17 @@ export default function CourseForm({ onSubmit, onCancel, initial }: Props) {
           <label className="block text-sm font-medium text-gray-700 mb-1">Total Credits</label>
           <input
             type="number"
-            min={1}
+            min={0}
             step={1}
             value={credits}
             onChange={(e) => {
               const v = parseFloat(e.target.value);
               setCredits(v);
-              if (hasLab) setTheoryCredits(Math.max(0, v - labCredits));
+              if (hasLab) {
+                const nextLab = v === 0 ? 0 : Math.min(labCredits, v);
+                setLabCredits(nextLab);
+                setTheoryCredits(Math.max(0, v - nextLab));
+              }
             }}
             className="w-full border rounded-lg px-3 py-2 text-sm"
           />
@@ -90,8 +93,9 @@ export default function CourseForm({ onSubmit, onCancel, initial }: Props) {
               onChange={(e) => {
                 setHasLab(e.target.checked);
                 if (e.target.checked) {
-                  setLabCredits(1);
-                  setTheoryCredits(credits - 1);
+                  const defaultLab = credits > 0 ? 1 : 0;
+                  setLabCredits(defaultLab);
+                  setTheoryCredits(Math.max(0, credits - defaultLab));
                 }
               }}
               className="rounded"
@@ -142,7 +146,7 @@ export default function CourseForm({ onSubmit, onCancel, initial }: Props) {
         onChange={setTheoryScheme}
         presets={[
           { label: 'Standard', value: { ...SCHEME_PRESETS.standardTheory } },
-          { label: 'No Assign/Quiz', value: { ...SCHEME_PRESETS.noAssignmentQuiz } },
+          { label: 'Project Based', value: { ...SCHEME_PRESETS.noAssignmentQuiz } },
         ]}
       />
 

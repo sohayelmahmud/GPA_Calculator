@@ -112,8 +112,10 @@ export function computeCourse(
 
     if (theoryResult.percent !== null && labResult.percent !== null) {
       coursePercent =
-        theoryResult.percent * (theoryCredits / totalCredits) +
-        labResult.percent * (labCredits / totalCredits);
+        totalCredits > 0
+          ? theoryResult.percent * (theoryCredits / totalCredits) +
+          labResult.percent * (labCredits / totalCredits)
+          : (theoryResult.percent + labResult.percent) / 2;
       provisional = !theoryResult.complete || !labResult.complete;
     } else if (theoryResult.percent !== null) {
       coursePercent = theoryResult.percent;
@@ -174,9 +176,11 @@ export function computeSemester(
     let creditSum = 0;
     for (const cr of gradedCourses) {
       const course = semCourses.find((c) => c.id === cr.courseId)!;
-      weightedSum += (cr.gradePoint ?? 0) * course.credits;
-      creditSum += course.credits;
-      if (cr.provisional) provisional = true;
+      if (course.credits > 0) {
+        weightedSum += (cr.gradePoint ?? 0) * course.credits;
+        creditSum += course.credits;
+        if (cr.provisional) provisional = true;
+      }
     }
     sgpa = creditSum > 0 ? weightedSum / creditSum : null;
     totalCredits = creditSum;
@@ -221,9 +225,11 @@ export function computeCGPA(
       for (const cr of sr.courses) {
         if (cr.coursePercent !== null) {
           const course = courses.find((c) => c.id === cr.courseId)!;
-          weightedSum += (cr.gradePoint ?? 0) * course.credits;
-          creditSum += course.credits;
-          if (cr.provisional) provisional = true;
+          if (course.credits > 0) {
+            weightedSum += (cr.gradePoint ?? 0) * course.credits;
+            creditSum += course.credits;
+            if (cr.provisional) provisional = true;
+          }
         }
       }
     }

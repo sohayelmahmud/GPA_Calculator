@@ -3,6 +3,11 @@ node_modules/
 
 # Build output
 dist/
+coverage/
+
+# Local caches
+.cache/
+.vite/
 
 # TypeScript build information
 *.tsbuildinfo
@@ -10,7 +15,13 @@ dist/
 # Local environment files
 .env
 .env.*
+.dev.vars
+.dev.vars.*
+*.local
 !.env.example
+
+# Cloudflare Wrangler local state
+.wrangler/
 
 # Logs
 *.log
@@ -32,3 +43,4 @@ IDEA.md
 PROPMT.md
 Plans.md
 Undone.txt
+commands.txt

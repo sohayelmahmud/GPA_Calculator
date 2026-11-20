@@ -170,8 +170,8 @@ export default function Dashboard({
                   setEditingSemName(sem.name);
                 }}
                 className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${selectedSemester?.id === sem.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:border-indigo-400'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:border-indigo-400'
                   }`}
               >
                 {sem.name}
@@ -243,14 +243,14 @@ export default function Dashboard({
             </div>
           ) : (
             <>
-              <div className="grid min-w-0 grid-cols-1 grid-flow-row-dense gap-4 lg:grid-cols-3">
+              <div className="grid min-w-0 grid-cols-1 grid-flow-row-dense gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {semResult.courses.map((cr) => {
                   const course = data.courses.find((c) => c.id === cr.courseId);
                   if (!course) return null;
                   return (
                     <div
                       key={course.id}
-                      className={`min-w-0 ${course.has_lab ? 'lg:col-span-2' : 'lg:col-span-1'}`}
+                      className={`min-w-0 ${course.has_lab ? 'md:col-span-2 lg:col-span-2' : 'md:col-span-1 lg:col-span-1'}`}
                     >
                       <DetailedCourseCard
                         course={course}
@@ -369,4 +369,3 @@ export default function Dashboard({
     </div>
   );
 }
-

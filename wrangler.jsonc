@@ -1,9 +1,18 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gpa-calculator",
+  "main": "src/worker/index.ts",
   "compatibility_date": "2026-11-20",
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "gpa_db",
+      "database_name": "gpa-db",
+      "database_id": "8ca6ea48-a0a3-4944-9aae-60865d0c1278"
+    }
+  ]
 }
