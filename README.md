@@ -234,6 +234,8 @@ Account data is stored in Cloudflare D1. The database tables include:
 
 - `users`
 - `sessions`
+- `otp_codes`
+- `messages`
 - `semesters`
 - `courses`
 - `marks`
@@ -292,6 +294,29 @@ Before deployment:
 1. Create or select a Cloudflare D1 database.
 2. Set the database ID in `wrangler.jsonc`.
 3. Apply the database migration.
+4. Configure the required Worker secrets and public environment variables.
+
+Set the public Turnstile site key for Vite:
+
+```bash
+cp .env.example .env
+```
+
+Set the Worker secrets:
+
+```bash
+npx wrangler secret put BREVO_API_KEY
+npx wrangler secret put BREVO_SENDER_EMAIL
+npx wrangler secret put TURNSTILE_SECRET_KEY
+```
+
+Set the optional Formspree endpoint:
+
+```bash
+npx wrangler secret put FORMSPREE_URL
+```
+
+Keep server-side secrets in Wrangler Secret bindings. The public `VITE_TURNSTILE_SITE_KEY` value is not a secret.
 
 Apply the migration locally:
 
@@ -346,6 +371,10 @@ Before public deployment, configure and verify the following:
 - Use HTTPS for every public deployment.
 - Keep passwords secure and avoid using the same password across separate services.
 - If account security becomes a concern later, add stronger password requirements, login throttling, and session revocation after password changes.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for supported versions and vulnerability reporting instructions.
 
 ## Technology
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { AppData, Course, CourseResult, MarkKind, MarkPart } from '@shared/types';
-import { round2 } from '@shared/grade';
+import { round2, calcSgpaGradeStepImpact } from '@shared/grade';
 import CourseForm from '@/components/CourseForm';
 
 interface DetailedCourseCardProps {
@@ -42,11 +42,19 @@ export function DetailedCourseCard({
   onStartEdit,
   onStopEdit,
 }: DetailedCourseCardProps) {
+  const [expanded, setExpanded] = useState(false);
   const [addingMark, setAddingMark] = useState<{ part: MarkPart; kind: MarkKind } | null>(null);
   const [label, setLabel] = useState('');
   const [obtained, setObtained] = useState('');
   const [maximum, setMaximum] = useState('10');
   const [markErrors, setMarkErrors] = useState<Record<string, string>>({});
+
+  const totalSemesterCredits = data.courses
+    .filter((c) => c.semester_id === course.semester_id)
+    .reduce((sum, c) => sum + c.credits, 0);
+  const sgpaImpact = calcSgpaGradeStepImpact(course.credits, totalSemesterCredits);
+
+  const isExpanded = expanded || editing;
 
   const setFieldError = (key: string, msg: string) => {
     setMarkErrors((prev) => ({ ...prev, [key]: msg }));
@@ -317,14 +325,117 @@ export function DetailedCourseCard({
 
   return (
     <article className="w-full min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="font-semibold text-base sm:text-lg break-words">{course.name}</h3>
-          <p className="text-xs text-gray-400">
-            {course.credits} credits{course.has_lab && ` (${course.theory_credits}T + ${course.lab_credits}L)`}
-          </p>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        onClick={() => {
+          if (!editing) setExpanded((prev) => !prev);
+        }}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !editing) {
+            e.preventDefault();
+            setExpanded((prev) => !prev);
+          }
+        }}
+        className="flex items-start justify-between gap-3 cursor-pointer select-none"
+      >
+        <div className="min-w-0 flex flex-col justify-between">
+          <div>
+            <h3 className="font-semibold text-base sm:text-lg break-words">{course.name}</h3>
+            <p className="text-xs text-gray-400">
+              {course.credits} credits{course.has_lab && ` (${course.theory_credits}T + ${course.lab_credits}L)`}
+            </p>
+          </div>
+
+          {totalSemesterCredits > 0 && (
+            <div className="mt-2.5 inline-flex w-fit flex-wrap items-center gap-1.5 rounded-md border border-slate-200/80 bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
+              <span className="font-semibold text-slate-800">
+                SGPA impact: ±{sgpaImpact.toFixed(2)}
+              </span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-500">per grade step</span>
+            </div>
+          )}
         </div>
-        <div className="shrink-0 text-right">
+
+        <div className="shrink-0 flex flex-col items-end text-right">
+          <div className="mb-1.5 flex items-center justify-end gap-1">
+            {isExpanded && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Delete course"
+                  title="Delete course"
+                  className="rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRequestDeleteCourse();
+                  }}
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    <line x1="10" x2="10" y1="11" y2="17" />
+                    <line x1="14" x2="14" y1="11" y2="17" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  aria-label={editing ? 'Close course settings' : 'Edit course'}
+                  title={editing ? 'Close course settings' : 'Edit course'}
+                  className="rounded-md p-1.5 text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (editing) {
+                      onStopEdit();
+                    } else {
+                      setExpanded(true);
+                      onStartEdit();
+                    }
+                  }}
+                >
+                  {editing ? (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" />
+                      <path d="m6 6 12 12" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                      <path d="m15 5 4 4" />
+                    </svg>
+                  )}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              aria-label={isExpanded ? 'Collapse course' : 'Expand course'}
+              title={isExpanded ? 'Collapse course' : 'Expand course'}
+              className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!editing) setExpanded((prev) => !prev);
+              }}
+            >
+              <svg
+                className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+
           <p className="text-xl sm:text-2xl font-bold">
             {result.coursePercent === null ? '—' : `${round2(result.coursePercent).toFixed(2)}%`}
           </p>
@@ -335,48 +446,39 @@ export function DetailedCourseCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button type="button" className="text-sm text-indigo-600" onClick={editing ? onStopEdit : onStartEdit}>
-          {editing ? 'Close course settings' : 'Edit course'}
-        </button>
-        <button
-          type="button"
-          className="text-sm text-red-500 hover:underline cursor-pointer"
-          onClick={onRequestDeleteCourse}
-        >
-          Delete course
-        </button>
-      </div>
+      {isExpanded && (
+        <>
+          {editing && (
+            <CourseForm
+              initial={{
+                name: course.name,
+                credits: course.credits,
+                hasLab: course.has_lab,
+                theoryCredits: course.theory_credits,
+                labCredits: course.lab_credits,
+                scheme: course.scheme,
+              }}
+              onSubmit={(name, credits, hasLab, theoryCredits, labCredits, scheme) => {
+                updateCourse(course.id, {
+                  name,
+                  credits,
+                  has_lab: hasLab,
+                  theory_credits: theoryCredits,
+                  lab_credits: labCredits,
+                  scheme,
+                });
+                onStopEdit();
+              }}
+              onCancel={onStopEdit}
+            />
+          )}
 
-      {editing && (
-        <CourseForm
-          initial={{
-            name: course.name,
-            credits: course.credits,
-            hasLab: course.has_lab,
-            theoryCredits: course.theory_credits,
-            labCredits: course.lab_credits,
-            scheme: course.scheme,
-          }}
-          onSubmit={(name, credits, hasLab, theoryCredits, labCredits, scheme) => {
-            updateCourse(course.id, {
-              name,
-              credits,
-              has_lab: hasLab,
-              theory_credits: theoryCredits,
-              lab_credits: labCredits,
-              scheme,
-            });
-            onStopEdit();
-          }}
-          onCancel={onStopEdit}
-        />
+          <div className={`grid min-w-0 gap-3 ${course.has_lab ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+            {renderPart('theory')}
+            {course.has_lab && renderPart('lab')}
+          </div>
+        </>
       )}
-
-      <div className={`grid min-w-0 gap-3 ${course.has_lab ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
-        {renderPart('theory')}
-        {course.has_lab && renderPart('lab')}
-      </div>
     </article>
   );
 }

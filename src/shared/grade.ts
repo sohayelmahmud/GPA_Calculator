@@ -248,3 +248,14 @@ export function computeCGPA(
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * Impact on SGPA for per grade in a course
+ */
+export function calcSgpaGradeStepImpact(
+  courseCredits: number,
+  totalSemesterCredits: number,
+): number {
+  if (totalSemesterCredits <= 0 || courseCredits <= 0) return 0;
+  return (courseCredits * (1 / 3)) / totalSemesterCredits;
+}

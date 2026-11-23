@@ -10,6 +10,7 @@ interface Props {
   resetGradeScale: () => void;
   resetData: () => void;
   user: AuthUser | null;
+  onUserUpdate?: (user: AuthUser) => void;
   onLogout: () => void;
 }
 
@@ -19,10 +20,19 @@ export default function Profile({
   resetGradeScale,
   resetData,
   user,
+  onUserUpdate,
   onLogout,
 }: Props) {
   const [scale, setScale] = useState(data.gradeScale);
   const [scaleSaved, setScaleSaved] = useState(false);
+
+  const [displayName, setDisplayName] = useState(user?.name ?? '');
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(user?.name ?? '');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [nameSaved, setNameSaved] = useState(false);
+
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
@@ -35,6 +45,52 @@ export default function Profile({
   useEffect(() => {
     setScale(data.gradeScale);
   }, [data.gradeScale]);
+
+  useEffect(() => {
+    if (user) {
+      setDisplayName(user.name);
+      setNameInput(user.name);
+    }
+  }, [user]);
+
+  const handleNameSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!user) return;
+
+    const trimmed = nameInput.trim();
+    if (!trimmed) {
+      setNameError('Name cannot be empty.');
+      return;
+    }
+
+    setNameSaving(true);
+    setNameError('');
+    setNameSaved(false);
+    try {
+      const response = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const result = (await response.json().catch(() => null)) as {
+        user?: AuthUser;
+        error?: string;
+      } | null;
+      if (!response.ok || !result?.user) {
+        throw new Error(result?.error || 'Unable to update name');
+      }
+
+      setDisplayName(result.user.name);
+      setEditingName(false);
+      setNameSaved(true);
+      onUserUpdate?.(result.user);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'Unable to update name');
+    } finally {
+      setNameSaving(false);
+    }
+  };
 
   const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -165,9 +221,66 @@ export default function Profile({
           <h2 className="font-semibold text-gray-900">Profile information</h2>
           <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg bg-gray-50 px-4 py-3">
-              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Name</dt>
-              <dd className="mt-1 font-medium text-gray-900">{user.name}</dd>
+              <div className="flex items-center justify-between">
+                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Name</dt>
+                {!editingName && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameInput(displayName);
+                      setNameError('');
+                      setNameSaved(false);
+                      setEditingName(true);
+                    }}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+
+              {editingName ? (
+                <form onSubmit={handleNameSave} className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    maxLength={100}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    className="block w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    autoFocus
+                  />
+                  {nameError && <p className="text-xs text-red-600">{nameError}</p>}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={nameSaving}
+                      className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {nameSaving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={nameSaving}
+                      onClick={() => {
+                        setEditingName(false);
+                        setNameError('');
+                      }}
+                      className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <dd className="mt-1 font-medium text-gray-900">{displayName}</dd>
+                  {nameSaved && (
+                    <p className="mt-1 text-xs text-green-600">Name updated.</p>
+                  )}
+                </>
+              )}
             </div>
+
             <div className="rounded-lg bg-gray-50 px-4 py-3">
               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Roll Number</dt>
               <dd className="mt-1 font-medium text-gray-900">{user.roll}</dd>

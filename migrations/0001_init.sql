@@ -4,8 +4,24 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   roll TEXT NOT NULL UNIQUE,
+  email TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   salt TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS otp_codes (
+  email TEXT PRIMARY KEY,
+  otp_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
 

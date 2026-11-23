@@ -2,26 +2,33 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { DEFAULT_GRADE_SCALE } from '../shared/types';
-import { isValidRoll, normalizeRoll, ROLL_ERROR_MSG } from '../shared/rollValidation';
+import { isValidRoll, normalizeRoll } from '../shared/rollValidation';
 
 type Env = {
   gpa_db: D1Database;
   ASSETS: Fetcher;
+  BREVO_API_KEY: string;
+  BREVO_SENDER_EMAIL: string;
+  FORMSPREE_URL?: string;
+  TURNSTILE_SECRET_KEY?: string;
 };
 
 type UserRow = {
   id: string;
   name: string;
   roll: string;
+  email: string | null;
 };
 
 type Variables = {
   user: UserRow;
 };
 
+const STUDENT_EMAIL_DOMAIN = '@isbstudent.comsats.edu.pk';
+
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// ─── Crypto Helpers (Web Crypto PBKDF2) ───
+// ─── Crypto & OTP Helpers ───
 
 function toHex(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -55,14 +62,160 @@ async function hashPassword(password: string, saltHex?: string): Promise<{ hash:
   return { hash: toHex(derived), salt: toHex(saltBytes) };
 }
 
+async function hashOtp(email: string, otp: string): Promise<string> {
+  const data = new TextEncoder().encode(`${email.toLowerCase()}:${otp}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return toHex(digest);
+}
+
+function generateOtp(): string {
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  return String(100000 + (array[0] % 900000));
+}
+
+function extractRollFromEmail(email: string): string | null {
+  const lower = email.trim().toLowerCase();
+  if (!lower.endsWith(STUDENT_EMAIL_DOMAIN)) return null;
+  const prefix = lower.slice(0, -STUDENT_EMAIL_DOMAIN.length);
+  const roll = normalizeRoll(prefix);
+  return isValidRoll(roll) ? roll : null;
+}
+
+async function sendBrevoOtpEmail(env: Env, toEmail: string, otp: string, purpose: 'register' | 'reset'): Promise<boolean> {
+  const subject =
+    purpose === 'register'
+      ? `${otp} is your COMSATS GPA Calculator verification code`
+      : `${otp} is your COMSATS GPA Calculator password reset code`;
+
+  const title = purpose === 'register' ? 'Verify your Student Email' : 'Reset your Password';
+  const desc =
+    purpose === 'register'
+      ? 'Use the verification code below to complete your COMSATS GPA Calculator registration.'
+      : 'Use the verification code below to reset your COMSATS GPA Calculator account password.';
+
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': env.BREVO_API_KEY,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: 'COMSATS GPA Calculator',
+        email: env.BREVO_SENDER_EMAIL,
+      },
+      to: [{ email: toEmail }],
+      subject,
+      htmlContent: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
+          <h2 style="margin: 0 0 12px; color: #0f172a; font-size: 20px;">${title}</h2>
+          <p style="margin: 0 0 20px; color: #475569; font-size: 14px; line-height: 1.5;">${desc}</p>
+          <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; text-align: center; letter-spacing: 6px; font-size: 28px; font-weight: 700; color: #0f172a;">
+            ${otp}
+          </div>
+          <p style="margin: 20px 0 0; color: #64748b; font-size: 12px;">This code will expire in 15 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+      `,
+    }),
+  });
+
+  return res.ok;
+}
+
+async function verifyTurnstile(secret: string | undefined, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!secret) return true; // Skip check if secret is not configured
+  if (!token) return false;
+
+  const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      secret,
+      response: token,
+      remoteip: ip,
+    }),
+  }).catch(() => null);
+
+  if (!res || !res.ok) return false;
+  const data = (await res.json().catch(() => null)) as { success?: boolean } | null;
+  return Boolean(data?.success);
+}
+
 // ─── Auth Routes ───
+
+const sendOtpSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  purpose: z.enum(['register', 'reset']).default('register'),
+  turnstileToken: z.string().optional(),
+  company_url: z.string().optional(),
+});
+
+app.post('/api/auth/send-otp', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = sendOtpSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Please enter a valid email address' }, 400);
+  if (parsed.data.company_url?.trim()) return c.json({ ok: true });
+
+  const isHuman = await verifyTurnstile(
+    c.env.TURNSTILE_SECRET_KEY,
+    parsed.data.turnstileToken,
+    c.req.header('CF-Connecting-IP'),
+  );
+  if (!isHuman) {
+    return c.json({ error: 'Security verification failed. Please refresh and try again.' }, 400);
+  }
+
+  const { email, purpose } = parsed.data;
+  const roll = extractRollFromEmail(email);
+  if (!roll) {
+    return c.json({ error: `Please use your official CUI student email (${STUDENT_EMAIL_DOMAIN})` }, 400);
+  }
+
+  const existing = await c.env.gpa_db
+    .prepare('SELECT id FROM users WHERE email = ? OR roll = ?')
+    .bind(email, roll)
+    .first();
+
+  if (purpose === 'register' && existing) {
+    return c.json({ error: 'This student account is already registered. Please sign in.' }, 409);
+  }
+  if (purpose === 'reset' && !existing) {
+    return c.json({ error: 'No account found with this student email.' }, 404);
+  }
+
+  // Rate limit: prevent resending within 60 seconds (15 min expiry - 1 min = 14 min)
+  const existingOtp = await c.env.gpa_db
+    .prepare('SELECT expires_at FROM otp_codes WHERE email = ?')
+    .bind(email)
+    .first<{ expires_at: number }>();
+  const now = Date.now();
+  if (existingOtp && existingOtp.expires_at - now > 1000 * 60 * 14) {
+    return c.json({ error: 'Please wait 1 minute before requesting another code.' }, 429);
+  }
+
+  const otp = generateOtp();
+  const otpHash = await hashOtp(email, otp);
+  const expiresAt = now + 1000 * 60 * 15; // 15 minutes
+
+  const sent = await sendBrevoOtpEmail(c.env, email, otp, purpose);
+  if (!sent) {
+    return c.json({ error: 'Failed to send verification email. Please try again.' }, 502);
+  }
+
+  await c.env.gpa_db
+    .prepare('INSERT OR REPLACE INTO otp_codes (email, otp_hash, expires_at) VALUES (?, ?, ?)')
+    .bind(email, otpHash, expiresAt)
+    .run();
+
+  return c.json({ ok: true, roll });
+});
 
 const registerSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  roll: z
-    .string()
-    .transform(normalizeRoll)
-    .refine(isValidRoll, { message: ROLL_ERROR_MSG }),
+  email: z.string().trim().toLowerCase().email(),
+  otp: z.string().trim().length(6),
   password: z.string().min(4).max(128),
 });
 
@@ -70,33 +223,52 @@ app.post('/api/auth/register', async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
-    const rollIssue = parsed.error.issues.find((i) => i.path[0] === 'roll');
-    return c.json({ error: rollIssue ? rollIssue.message : 'Invalid input' }, 400);
+    return c.json({ error: 'Please fill all fields correctly (including 6-digit OTP).' }, 400);
   }
 
-  const roll = parsed.data.roll;
+  const { name, email, otp, password } = parsed.data;
+  const roll = extractRollFromEmail(email);
+  if (!roll) {
+    return c.json({ error: `Invalid student email. Must end with ${STUDENT_EMAIL_DOMAIN}` }, 400);
+  }
+
+  const otpRow = await c.env.gpa_db
+    .prepare('SELECT otp_hash, expires_at FROM otp_codes WHERE email = ?')
+    .bind(email)
+    .first<{ otp_hash: string; expires_at: number }>();
+
+  const now = Date.now();
+  if (!otpRow || otpRow.expires_at < now) {
+    return c.json({ error: 'Verification code expired or not found. Please request a new code.' }, 400);
+  }
+
+  const expectedHash = await hashOtp(email, otp);
+  if (expectedHash !== otpRow.otp_hash) {
+    return c.json({ error: 'Invalid verification code.' }, 400);
+  }
+
   const existing = await c.env.gpa_db
-    .prepare('SELECT id FROM users WHERE roll = ?')
-    .bind(roll)
+    .prepare('SELECT id FROM users WHERE roll = ? OR email = ?')
+    .bind(roll, email)
     .first();
-  if (existing) return c.json({ error: 'Roll number already registered' }, 409);
+  if (existing) return c.json({ error: 'Account already registered' }, 409);
 
   const userId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
-  const { hash, salt } = await hashPassword(parsed.data.password);
-  const now = Date.now();
+  const { hash, salt } = await hashPassword(password);
   const expiresAt = now + 1000 * 60 * 60 * 24 * 30; // 30 days
 
-  const stmts: D1PreparedStatement[] = [
+  await c.env.gpa_db.batch([
     c.env.gpa_db
-      .prepare('INSERT INTO users (id, name, roll, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(userId, parsed.data.name, roll, hash, salt, now),
+      .prepare('INSERT INTO users (id, name, roll, email, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(userId, name, roll, email, hash, salt, now),
     c.env.gpa_db
       .prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
       .bind(sessionId, userId, expiresAt),
-  ];
-
-  await c.env.gpa_db.batch(stmts);
+    c.env.gpa_db
+      .prepare('DELETE FROM otp_codes WHERE email = ?')
+      .bind(email),
+  ]);
 
   setCookie(c, 'session_id', sessionId, {
     httpOnly: true,
@@ -106,14 +278,11 @@ app.post('/api/auth/register', async (c) => {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  return c.json({ user: { id: userId, name: parsed.data.name, roll } }, 201);
+  return c.json({ user: { id: userId, name, roll, email } }, 201);
 });
 
 const loginSchema = z.object({
-  roll: z
-    .string()
-    .transform(normalizeRoll)
-    .refine((val) => val.length > 0),
+  identifier: z.string().trim().min(1),
   password: z.string().min(1),
 });
 
@@ -122,16 +291,23 @@ app.post('/api/auth/login', async (c) => {
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: 'Invalid credentials' }, 400);
 
-  const roll = parsed.data.roll;
-  const user = await c.env.gpa_db
-    .prepare('SELECT id, name, roll, password_hash, salt FROM users WHERE roll = ?')
-    .bind(roll)
-    .first<UserRow & { password_hash: string; salt: string }>();
+  const rawId = parsed.data.identifier.trim();
+  const isEmail = rawId.includes('@');
 
-  if (!user) return c.json({ error: 'Invalid roll number or password' }, 401);
+  const user = isEmail
+    ? await c.env.gpa_db
+      .prepare('SELECT id, name, roll, email, password_hash, salt FROM users WHERE LOWER(email) = ?')
+      .bind(rawId.toLowerCase())
+      .first<UserRow & { password_hash: string; salt: string }>()
+    : await c.env.gpa_db
+      .prepare('SELECT id, name, roll, email, password_hash, salt FROM users WHERE roll = ?')
+      .bind(normalizeRoll(rawId))
+      .first<UserRow & { password_hash: string; salt: string }>();
+
+  if (!user) return c.json({ error: 'Invalid email/roll number or password' }, 401);
 
   const { hash } = await hashPassword(parsed.data.password, user.salt);
-  if (hash !== user.password_hash) return c.json({ error: 'Invalid roll number or password' }, 401);
+  if (hash !== user.password_hash) return c.json({ error: 'Invalid email/roll number or password' }, 401);
 
   const sessionId = crypto.randomUUID();
   const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30;
@@ -148,7 +324,56 @@ app.post('/api/auth/login', async (c) => {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  return c.json({ user: { id: user.id, name: user.name, roll: user.roll } });
+  return c.json({ user: { id: user.id, name: user.name, roll: user.roll, email: user.email } });
+});
+
+const resetPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  otp: z.string().trim().length(6),
+  newPassword: z.string().min(4).max(128),
+});
+
+app.post('/api/auth/reset-password', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = resetPasswordSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Please fill all fields correctly.' }, 400);
+
+  const { email, otp, newPassword } = parsed.data;
+  const otpRow = await c.env.gpa_db
+    .prepare('SELECT otp_hash, expires_at FROM otp_codes WHERE email = ?')
+    .bind(email)
+    .first<{ otp_hash: string; expires_at: number }>();
+
+  if (!otpRow || otpRow.expires_at < Date.now()) {
+    return c.json({ error: 'Verification code expired or invalid.' }, 400);
+  }
+
+  const expectedHash = await hashOtp(email, otp);
+  if (expectedHash !== otpRow.otp_hash) {
+    await c.env.gpa_db.prepare('DELETE FROM otp_codes WHERE email = ?').bind(email).run();
+    return c.json({ error: 'Invalid verification code.' }, 400);
+  }
+
+  const user = await c.env.gpa_db
+    .prepare('SELECT id FROM users WHERE LOWER(email) = ?')
+    .bind(email)
+    .first<{ id: string }>();
+  if (!user) return c.json({ error: 'Account not found.' }, 404);
+
+  const { hash, salt } = await hashPassword(newPassword);
+  await c.env.gpa_db.batch([
+    c.env.gpa_db
+      .prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?')
+      .bind(hash, salt, user.id),
+    c.env.gpa_db
+      .prepare('DELETE FROM otp_codes WHERE email = ?')
+      .bind(email),
+    c.env.gpa_db
+      .prepare('DELETE FROM sessions WHERE user_id = ?')
+      .bind(user.id),
+  ]);
+
+  return c.json({ ok: true });
 });
 
 app.post('/api/auth/logout', async (c) => {
@@ -160,10 +385,84 @@ app.post('/api/auth/logout', async (c) => {
   return c.json({ ok: true });
 });
 
+const contactSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().email().max(150),
+  message: z.string().trim().min(5).max(2000),
+  turnstileToken: z.string().optional(),
+  company_url: z.string().optional(),
+});
+
+app.post('/api/contact', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = contactSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Please fill out all fields properly (message at least 5 characters).' }, 400);
+  }
+  if (parsed.data.company_url?.trim()) return c.json({ ok: true }, 201);
+
+  const isHuman = await verifyTurnstile(
+    c.env.TURNSTILE_SECRET_KEY,
+    parsed.data.turnstileToken,
+    c.req.header('CF-Connecting-IP'),
+  );
+  if (!isHuman) {
+    return c.json({ error: 'Security verification failed. Please complete the check and try again.' }, 400);
+  }
+
+  let userId: string | null = null;
+  const sessionId = getCookie(c, 'session_id');
+  if (sessionId) {
+    const session = await c.env.gpa_db
+      .prepare('SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?')
+      .bind(sessionId, Date.now())
+      .first<{ user_id: string }>();
+    if (session) userId = session.user_id;
+  }
+
+  const { name, email, message } = parsed.data;
+
+  // 1. Store permanently in D1 database
+  await c.env.gpa_db
+    .prepare('INSERT INTO messages (id, user_id, name, email, message, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(crypto.randomUUID(), userId, name, email, message, Date.now())
+    .run();
+
+  // 2. Forward to Formspree only (preserves Brevo daily quota strictly for OTPs)
+  if (c.env.FORMSPREE_URL) {
+    await fetch(c.env.FORMSPREE_URL, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': c.req.header('User-Agent') || 'Mozilla/5.0',
+        Referer: c.req.header('Origin') || 'https://sohayel.tech',
+      },
+      body: JSON.stringify({
+        name,
+        email,
+        userId: userId || 'Guest',
+        message,
+        _subject: `[GPA Calculator] New message from ${name}`,
+      }),
+    }).catch(() => undefined);
+  }
+
+  return c.json({ ok: true }, 201);
+});
+
 // ─── Auth Middleware for Protected /api/* Routes ───
 
 app.use('/api/*', async (c, next) => {
-  if (c.req.path.startsWith('/api/auth/login') || c.req.path.startsWith('/api/auth/register') || c.req.path.startsWith('/api/auth/logout')) {
+  const publicAuthPaths = [
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/logout',
+    '/api/auth/send-otp',
+    '/api/auth/reset-password',
+    '/api/contact',
+  ];
+  if (publicAuthPaths.some((p) => c.req.path.startsWith(p))) {
     return next();
   }
 
@@ -172,7 +471,7 @@ app.use('/api/*', async (c, next) => {
 
   const row = await c.env.gpa_db
     .prepare(
-      `SELECT u.id, u.name, u.roll, s.expires_at
+      `SELECT u.id, u.name, u.roll, u.email, s.expires_at
        FROM sessions s JOIN users u ON s.user_id = u.id
        WHERE s.id = ?`,
     )
@@ -185,12 +484,26 @@ app.use('/api/*', async (c, next) => {
     return c.json({ error: 'Session expired' }, 401);
   }
 
-  c.set('user', { id: row.id, name: row.name, roll: row.roll });
+  c.set('user', { id: row.id, name: row.name, roll: row.roll, email: row.email });
   return next();
 });
 
 app.get('/api/auth/me', (c) => {
   return c.json({ user: c.get('user') });
+});
+
+app.put('/api/auth/profile', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.json().catch(() => null);
+  const parsed = z.object({ name: z.string().trim().min(1).max(100) }).safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Name must be between 1 and 100 characters' }, 400);
+
+  await c.env.gpa_db
+    .prepare('UPDATE users SET name = ? WHERE id = ?')
+    .bind(parsed.data.name, user.id)
+    .run();
+
+  return c.json({ user: { ...user, name: parsed.data.name } });
 });
 
 app.put('/api/auth/password', async (c) => {
@@ -213,10 +526,15 @@ app.put('/api/auth/password', async (c) => {
   if (currentHash !== dbUser.password_hash) return c.json({ error: 'Current password is incorrect' }, 400);
 
   const { hash: newHash, salt: newSalt } = await hashPassword(parsed.data.newPassword);
-  await c.env.gpa_db
-    .prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?')
-    .bind(newHash, newSalt, user.id)
-    .run();
+  const currentSessionId = getCookie(c, 'session_id');
+  await c.env.gpa_db.batch([
+    c.env.gpa_db
+      .prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?')
+      .bind(newHash, newSalt, user.id),
+    c.env.gpa_db
+      .prepare('DELETE FROM sessions WHERE user_id = ? AND id <> ?')
+      .bind(user.id, currentSessionId || ''),
+  ]);
 
   return c.json({ ok: true });
 });

@@ -5,6 +5,9 @@ import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import Profile from '@/pages/Profile';
 import Auth, { type AuthUser } from '@/pages/Auth';
+import Contact from '@/pages/Contact';
+import Privacy from '@/pages/Privacy';
+import Terms from '@/pages/Terms';
 
 const CACHED_USER_KEY = 'gpa_calc_auth_user_v1';
 
@@ -62,6 +65,11 @@ export default function App() {
     navigate('/', { replace: true });
   };
 
+  const handleUserUpdate = (updatedUser: AuthUser) => {
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(updatedUser));
+    setUser(updatedUser);
+  };
+
   const handleLogout = () => {
     if (user?.id) clearUserOfflineData(user.id);
     localStorage.removeItem(CACHED_USER_KEY);
@@ -87,7 +95,14 @@ export default function App() {
         <Route path="/" element={<Dashboard {...dataHook} />} />
         <Route
           path="/profile"
-          element={<Profile {...dataHook} user={user} onLogout={handleLogout} />}
+          element={
+            <Profile
+              {...dataHook}
+              user={user}
+              onUserUpdate={handleUserUpdate}
+              onLogout={handleLogout}
+            />
+          }
         />
         <Route
           path="/auth"
@@ -100,6 +115,9 @@ export default function App() {
           }
         />
         <Route path="/settings" element={<Navigate to="/profile" replace />} />
+        <Route path="/contact" element={<Contact user={user} />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
