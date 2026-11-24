@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { AppData, Course, CourseResult, MarkKind, MarkPart } from '@shared/types';
 import { round2, calcSgpaGradeStepImpact } from '@shared/grade';
 import CourseForm from '@/components/CourseForm';
+import { parsePortalMarks, type ParsedPortalMark } from '../../utils/portalMarksParser';
 
 interface DetailedCourseCardProps {
   course: Course;
@@ -48,6 +49,10 @@ export function DetailedCourseCard({
   const [obtained, setObtained] = useState('');
   const [maximum, setMaximum] = useState('10');
   const [markErrors, setMarkErrors] = useState<Record<string, string>>({});
+  const [showImport, setShowImport] = useState(false);
+  const [portalText, setPortalText] = useState('');
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
 
   const totalSemesterCredits = data.courses
     .filter((c) => c.semester_id === course.semester_id)
@@ -123,6 +128,47 @@ export function DetailedCourseCard({
       markObtained,
     );
     setAddingMark(null);
+  };
+
+  const importPortalMarks = () => {
+    const parsed = parsePortalMarks(portalText, course.has_lab);
+    setImportErrors(parsed.errors);
+    setImportWarnings(parsed.warnings);
+    if (parsed.errors.length > 0 || parsed.marks.length === 0) return;
+
+    const sections = new Set(
+      parsed.marks.map((mark: ParsedPortalMark) => `${mark.part}:${mark.kind}`),
+    );
+
+    for (const mark of data.marks) {
+      if (
+        mark.course_id === course.id &&
+        sections.has(`${mark.part}:${mark.kind}`)
+      ) {
+        deleteMark(mark.id);
+      }
+    }
+
+    for (const mark of parsed.marks) {
+      if (mark.kind === 'mid' || mark.kind === 'final') {
+        const existing = parsed.marks.filter(
+          (item) => item.part === mark.part && item.kind === mark.kind,
+        );
+        if (existing[0] !== mark) continue;
+      }
+      addMark(
+        course.id,
+        mark.part,
+        mark.kind,
+        mark.label,
+        mark.max,
+        mark.obtained,
+      );
+    }
+
+    setExpanded(true);
+    setShowImport(false);
+    setPortalText('');
   };
 
   const renderPart = (part: MarkPart) => {
@@ -365,6 +411,28 @@ export function DetailedCourseCard({
               <>
                 <button
                   type="button"
+                  aria-label="Import marks"
+                  title="Import marks"
+                  className="rounded-md p-1.5 text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(true);
+                    setShowImport(true);
+                    setImportErrors([]);
+                    setImportWarnings([]);
+                  }}
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3v12" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M5 21h14" />
+                    <path d="M5 21v-4" />
+                    <path d="M19 21v-4" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
                   aria-label="Delete course"
                   title="Delete course"
                   className="rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
@@ -448,6 +516,78 @@ export function DetailedCourseCard({
 
       {isExpanded && (
         <>
+          {showImport && (
+            <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h4 className="font-semibold text-gray-900">Import marks from portal text</h4>
+                  <p className="text-xs text-gray-500">Paste the copied theory and lab marks table.</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close import marks"
+                  title="Close"
+                  className="rounded-md p-1 text-gray-500 hover:bg-white"
+                  onClick={() => {
+                    setShowImport(false);
+                    setPortalText('');
+                    setImportErrors([]);
+                    setImportWarnings([]);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <textarea
+                value={portalText}
+                onChange={(event) => {
+                  setPortalText(event.target.value);
+                  setImportErrors([]);
+                  setImportWarnings([]);
+                }}
+                rows={9}
+                placeholder="Paste portal text here..."
+                className="w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-800"
+              />
+              {importErrors.length > 0 && (
+                <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">
+                  {importErrors.map((error) => (
+                    <p key={error}>{error}</p>
+                  ))}
+                </div>
+              )}
+              {importWarnings.length > 0 && (
+                <div className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+                  {importWarnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                  onClick={importPortalMarks}
+                  disabled={!portalText.trim()}
+                >
+                  Import
+                </button>
+                <button
+                  type="button"
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                  onClick={() => {
+                    setShowImport(false);
+                    setPortalText('');
+                    setImportErrors([]);
+                    setImportWarnings([]);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </section>
+          )}
+
           {editing && (
             <CourseForm
               initial={{

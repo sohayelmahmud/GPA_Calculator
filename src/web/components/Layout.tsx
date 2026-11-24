@@ -14,36 +14,58 @@ export default function Layout({
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-30 border-b border-gray-200 bg-white">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <Link to="/" className="text-lg font-bold text-indigo-600">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-[clamp(4px,1.5vw,12px)] px-[clamp(8px,3vw,16px)]">
+          <div className="flex min-w-0 items-center gap-[clamp(4px,1.2vw,8px)]">
+            <Link
+              to="/"
+              className="whitespace-nowrap font-bold text-indigo-600 text-[clamp(13px,3.8vw,18px)]"
+            >
               GPA Calculator
             </Link>
             {!user && (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                Guest Mode
+              <span className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-[clamp(5px,1.5vw,8px)] py-0.5 font-medium text-amber-700 text-[clamp(9px,2.4vw,11px)]">
+                Guest<span className="hidden min-[380px]:inline"> Mode</span>
               </span>
             )}
           </div>
-          <nav className="flex items-center gap-4 text-sm font-medium">
+          <nav className="flex shrink-0 items-center gap-[clamp(6px,2.5vw,16px)] font-medium text-[clamp(11px,3vw,14px)]">
             <Link
               to="/"
-              className={`transition hover:text-indigo-600 ${location.pathname === '/' ? 'text-indigo-600' : 'text-gray-500'
+              className={`whitespace-nowrap transition hover:text-indigo-600 ${location.pathname === '/' ? 'text-indigo-600' : 'text-gray-500'
                 }`}
             >
               Dashboard
             </Link>
             <Link
               to="/profile"
-              className={`transition hover:text-indigo-600 ${location.pathname === '/profile' ? 'text-indigo-600' : 'text-gray-500'
+              aria-label={user ? 'Profile' : 'Settings'}
+              className={`flex items-center transition hover:text-indigo-600 ${location.pathname === '/profile' ? 'text-indigo-600' : 'text-gray-500'
                 }`}
             >
-              {user ? 'Profile' : 'Settings'}
+              {user ? (
+                'Profile'
+              ) : (
+                <>
+                  <span className="hidden sm:inline">Settings</span>
+                  <svg
+                    className="h-5 w-5 sm:hidden"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </>
+              )}
             </Link>
             {!user && (
               <Link
                 to="/auth"
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-700"
+                className="whitespace-nowrap rounded-lg bg-indigo-600 px-[clamp(8px,2.2vw,12px)] py-1.5 font-medium text-white transition hover:bg-indigo-700 text-[clamp(10px,2.8vw,12px)]"
               >
                 Login
               </Link>

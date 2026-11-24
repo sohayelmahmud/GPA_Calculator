@@ -140,6 +140,26 @@ export function computeCourse(
         break;
       }
     }
+
+    // COMSATS rule: must pass theory and lab separately in lab courses
+    if (
+      course.has_lab &&
+      labResult &&
+      theoryResult.percent !== null &&
+      labResult.percent !== null
+    ) {
+      const passingEntries = gradeScale.filter((g) => g.grade_point > 0);
+      if (passingEntries.length > 0) {
+        const minPass = Math.min(...passingEntries.map((g) => g.min_percent));
+        const theoryRounded = Math.round(theoryResult.percent * 100) / 100;
+        const labRounded = Math.round(labResult.percent * 100) / 100;
+
+        if (theoryRounded < minPass || labRounded < minPass) {
+          gradePoint = 0;
+          letter = 'F';
+        }
+      }
+    }
   }
 
   return {

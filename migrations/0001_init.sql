@@ -78,6 +78,17 @@ CREATE TABLE IF NOT EXISTS previous_semesters (
   sgpa REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS preset_courses (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  credits INTEGER NOT NULL,
+  has_lab INTEGER NOT NULL DEFAULT 0,
+  theory_credits INTEGER NOT NULL,
+  lab_credits INTEGER NOT NULL DEFAULT 0,
+  aliases TEXT DEFAULT '[]',
+  approved INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_semesters_user ON semesters(user_id);
 CREATE INDEX IF NOT EXISTS idx_courses_user ON courses(user_id);
@@ -85,3 +96,4 @@ CREATE INDEX IF NOT EXISTS idx_marks_user ON marks(user_id);
 CREATE INDEX IF NOT EXISTS idx_marks_course ON marks(course_id);
 CREATE INDEX IF NOT EXISTS idx_grade_scale_user ON grade_scale(user_id);
 CREATE INDEX IF NOT EXISTS idx_prev_sem_user ON previous_semesters(user_id);
+CREATE INDEX IF NOT EXISTS idx_preset_courses_approved ON preset_courses(approved, code);
